@@ -110,6 +110,19 @@ class BioPrivacyTests(unittest.IsolatedAsyncioTestCase):
         sleep.assert_awaited_once_with(RESULT_DELETE_AFTER_SECONDS)
         progress.message.delete.assert_awaited_once()
 
+    async def test_progress_embed_stays_compact_and_shows_current_step_only(self) -> None:
+        tracker = ProgressTracker(SimpleNamespace())
+        tracker.steps["received"] = ("success", "Request received.")
+        tracker.steps["thefancy"] = ("success", "Provider response received.")
+        tracker.steps["compose"] = ("active", "Composing suggestions.")
+
+        embed = tracker._build_embed()
+
+        self.assertEqual(len(embed.fields), 1)
+        self.assertEqual(embed.fields[0].name, "Étape 3/4 — Composition des styles")
+        self.assertIn("Composing suggestions.", embed.fields[0].value)
+        self.assertNotIn("Request received.", str(embed.to_dict()))
+
     async def test_button_delivers_every_copyable_suggestion_ephemerally(self) -> None:
         from cogs.bio import SuggestionView
 
@@ -117,7 +130,12 @@ class BioPrivacyTests(unittest.IsolatedAsyncioTestCase):
             SimpleNamespace(delete=AsyncMock()),
             SimpleNamespace(delete=AsyncMock()),
         ]
-        view = SuggestionView(123, ("first style", "second\nstyle"))
+        dismiss_progress = AsyncMock()
+        view = SuggestionView(
+            123,
+            ("first style", "second\nstyle"),
+            on_show=dismiss_progress,
+        )
         interaction = SimpleNamespace(
             user=SimpleNamespace(id=123),
             response=SimpleNamespace(send_message=AsyncMock()),
@@ -132,6 +150,7 @@ class BioPrivacyTests(unittest.IsolatedAsyncioTestCase):
                 await task
 
         interaction.response.send_message.assert_awaited_once()
+        dismiss_progress.assert_awaited_once()
         interaction.followup.send.assert_awaited_once()
         first = interaction.response.send_message.await_args
         second = interaction.followup.send.await_args
@@ -240,6 +259,16 @@ class BioPrivacyTests(unittest.IsolatedAsyncioTestCase):
 
         sleep.assert_awaited_once_with(RESULT_DELETE_AFTER_SECONDS)
         tracker.message.delete.assert_awaited_once()
+
+    async def test_progress_embed_can_be_dismissed_immediately(self) -> None:
+        tracker = ProgressTracker(SimpleNamespace())
+        message = SimpleNamespace(delete=AsyncMock())
+        tracker.message = message
+
+        await tracker.dismiss()
+
+        message.delete.assert_awaited_once()
+        self.assertIsNone(tracker.message)
 
     async def test_admin_clear_confirmation_purges_configured_channel(self) -> None:
         prompt = SimpleNamespace(id=789, delete=AsyncMock())

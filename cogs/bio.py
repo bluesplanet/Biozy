@@ -3,6 +3,7 @@ import logging
 import re
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 
 import discord
 from discord.ext import commands
@@ -131,13 +132,35 @@ class ProgressTracker:
         except Exception:
             logger.error("Unexpected failure deleting the completed progress embed.")
 
+    async def dismiss(self) -> None:
+        async with self._edit_lock:
+            if self._delete_task is not None:
+                self._delete_task.cancel()
+                self._delete_task = None
+            message = self.message
+            self.message = None
+
+        if message is None:
+            return
+        try:
+            await message.delete()
+        except discord.NotFound:
+            logger.info("The progress embed was already deleted.")
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("Could not immediately delete the progress embed.")
+        except Exception as error:
+            logger.error(
+                "Unexpected error deleting the progress embed (type=%s).",
+                type(error).__name__,
+            )
+
     def _build_embed(self) -> discord.Embed:
-        states = {state for state, _ in self.steps.values()}
-        if "error" in states:
+        current_stage, (current_state, detail) = next(reversed(self.steps.items()))
+        if current_state == "error":
             color = discord.Color.red()
-        elif "warning" in states:
+        elif current_state == "warning":
             color = discord.Color.orange()
-        elif self.steps.get("done", (None,))[0] == "success":
+        elif current_stage == "done" and current_state == "success":
             color = discord.Color.green()
         else:
             color = discord.Color.blue()
@@ -145,21 +168,18 @@ class ProgressTracker:
         embed = discord.Embed(
             title="Biozy — traitement de la demande",
             description=(
-                "Suivi des étapes réellement exécutées : réception, suppression "
-                "du message, appels aux services de styles, composition et "
-                "vérification. Le texte soumis et les suggestions ne sont "
-                "jamais affichés dans ce salon."
+                "Étape actuelle du traitement. Le texte soumis et les "
+                "suggestions ne sont jamais affichés dans ce salon."
             ),
             color=color,
         )
-        for stage, (state, detail) in self.steps.items():
-            label = STAGE_LABELS.get(stage, stage)
-            state_label = STATE_LABELS.get(state, state)
-            embed.add_field(
-                name=label,
-                value=f"**{state_label}** — {detail}",
-                inline=False,
-            )
+        label = STAGE_LABELS.get(current_stage, current_stage)
+        state_label = STATE_LABELS.get(current_state, current_state)
+        embed.add_field(
+            name=label,
+            value=f"**{state_label}** — {detail}",
+            inline=False,
+        )
         return embed
 
 
@@ -186,10 +206,12 @@ class SuggestionView(discord.ui.View):
         self,
         author_id: int,
         suggestions: tuple[str, ...],
+        on_show: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__(timeout=RESULT_DELETE_AFTER_SECONDS)
         self.author_id = author_id
         self.suggestions = suggestions
+        self._on_show = on_show
         self._last_click: float | None = None
         self._delete_tasks: set[asyncio.Task[None]] = set()
 
@@ -227,6 +249,17 @@ class SuggestionView(discord.ui.View):
                         ephemeral=True,
                         allowed_mentions=discord.AllowedMentions.none(),
                     )
+                    if self._on_show is not None:
+                        try:
+                            await self._on_show()
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as error:
+                            logger.error(
+                                "Could not dismiss the progress embed after "
+                                "showing suggestions (type=%s).",
+                                type(error).__name__,
+                            )
                     private_message = await interaction.original_response()
                 else:
                     private_message = await interaction.followup.send(
@@ -548,7 +581,11 @@ class BioStyler(commands.Cog):
         if warning:
             detail += " A provider was unavailable; fallback results were used."
 
-        view = SuggestionView(message.author.id, batch.suggestions)
+        view = SuggestionView(
+            message.author.id,
+            batch.suggestions,
+            on_show=progress.dismiss,
+        )
         shown = await progress.complete(
             "warning" if warning else "success",
             detail,

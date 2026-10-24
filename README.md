@@ -2,12 +2,12 @@
 
 Biozy surveille un salon choisi par un administrateur. Lorsqu'un membre y
 envoie du texte, le bot tente de supprimer le message original, génère jusqu'à
-cinq variantes décorées. Un embed public de suivi décrit explicitement les
-étapes : réception, suppression du message, appels aux APIs, composition et
-vérification. À la fin, un bouton permet à l'auteur de recevoir chaque
-suggestion dans un bloc de code par réponse éphémère, invisible aux autres
-membres. Le suivi et les réponses éphémères sont supprimés automatiquement
-après 1 minute.
+cinq variantes décorées. Un embed public compact affiche l'étape de traitement
+actuelle sans s'allonger au fil de la progression. À la fin, un bouton permet
+à l'auteur de recevoir chaque suggestion dans un bloc de code par réponse
+éphémère, invisible aux autres membres. Le suivi est supprimé dès que l'auteur
+affiche ses suggestions, ou après 1 minute s'il ne clique pas. Les réponses
+éphémères sont supprimées après 1 minute.
 
 ## Architecture
 
@@ -78,15 +78,17 @@ les décorations locales peuvent encore fournir des résultats.
   accorder **Gérer les messages** dans le salon. Sans cette permission, Biozy
   le signale discrètement, mais ne prétend pas l'avoir supprimé.
 - L'embed public de suivi ne contient jamais le texte soumis ni les
-  suggestions. Le bouton final ne révèle les suggestions que dans des réponses
-  éphémères à l'auteur ; les autres membres ne peuvent pas les consulter.
+  suggestions et ne montre que l'étape actuelle. Le bouton final ne révèle les
+  suggestions que dans des réponses éphémères à l'auteur ; les autres membres
+  ne peuvent pas les consulter.
 - Les suggestions éphémères sont envoyées une par message en bloc de code,
   afin de faciliter leur copie. Les espaces et retours à la ligne sont
   normalisés pour éviter qu'une variante se présente différemment.
 - Le bot supprime le message original s'il en a la permission, puis supprime
-  son embed de suivi et les réponses éphémères après 1 minute, ainsi que ses
-  avertissements temporaires après 10 secondes. Le traitement normal n'efface
-  pas les autres messages des membres.
+  immédiatement son embed de suivi quand l'auteur demande ses suggestions
+  privées (ou après 1 minute sans clic). Les réponses éphémères disparaissent
+  après 1 minute et les avertissements temporaires après 10 secondes. Le
+  traitement normal n'efface pas les autres messages des membres.
 - Un administrateur peut lancer `.viderbio` pour effacer l'historique
   supprimable du salon configuré. Biozy demande une confirmation valable
   30 secondes et vérifie ses permissions avant le nettoyage. Cette action
@@ -108,8 +110,9 @@ les décorations locales peuvent encore fournir des résultats.
   Biozy sont en anglais. Une configuration ou un token invalide au démarrage
   reste une erreur fatale explicite, car le bot ne peut pas fonctionner de
   façon fiable sans eux.
-- L'embed de progression affiche l'état de chaque étape exécutée sans le texte
-  soumis. Une fois terminé, son bouton donne accès aux suggestions privées.
+- L'embed de progression affiche uniquement l'étape actuelle sans le texte
+  soumis. Une fois terminé, son bouton donne accès aux suggestions privées et
+  le suivi est supprimé dès la première suggestion envoyée.
 - Biozy utilise uniquement des commandes préfixées par `.`. Il ne crée pas de
   commandes slash.
 
@@ -150,10 +153,10 @@ les décorations locales peuvent encore fournir des résultats.
    affiche le salon actuel et `.configbio off` désactive le traitement.
    `.viderbio` nettoie l'historique du salon Biozy après confirmation.
 10. Publie un message de test dans le salon configuré. Biozy affiche un embed
-    décrivant les étapes, supprime le message original si possible, puis
-    affiche un bouton de résultat. L'auteur clique dessus pour recevoir des
-    suggestions copiables en réponses éphémères; l'embed disparaît après
-    1 minute.
+    compact indiquant l'étape en cours, supprime le message original si
+    possible, puis affiche un bouton de résultat. L'auteur clique dessus pour
+    recevoir des suggestions copiables en réponses éphémères; l'embed disparaît
+    immédiatement au clic ou après 1 minute sans clic.
 
 ## Tests
 
@@ -179,8 +182,9 @@ Checklist de validation Discord :
 - [ ] L'embed décrit les étapes en cours sans révéler le texte soumis.
 - [ ] Le bouton de résultat montre les suggestions en blocs copiables
   uniquement à l'auteur via des réponses éphémères; aucun DM n'est envoyé.
-- [ ] Le suivi et les résultats éphémères disparaissent après 1 minute; les
-  avertissements temporaires disparaissent après 10 secondes.
+- [ ] Le suivi disparaît au clic sur le bouton ou après 1 minute sans clic;
+  les résultats éphémères disparaissent après 1 minute et les avertissements
+  temporaires après 10 secondes.
 - [ ] En dehors de `.viderbio`, le bot ne supprime aucun autre message membre.
 - [ ] Les erreurs HTTP, JSON invalide, API indisponible et réponse vide
   n'arrêtent pas le bot et déclenchent le secours de l'autre API/local.
